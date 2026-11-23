@@ -187,7 +187,7 @@ class IlastikProject:
             canonical_shape, canonical_axes = cshape[0].shape, cshape[1]
         caxes = canonical_axes
         full = np.zeros(canonical_shape, np.uint8)
-        for bname, ds in g[names[lane]].items():
+        for ds in g[names[lane]].values():
             data = ds["data"][()] if hasattr(ds, "keys") else ds[()]
             attrs = ds.attrs
             baxes = _axes_from_tags(attrs.get("axistags", "")) or caxes

@@ -14,7 +14,7 @@ from collections import OrderedDict
 
 import numpy as np
 
-from ..blocks import bytes_per_voxel, default_block_shape, iter_blocks, memory_budget, with_halo
+from ..blocks import bytes_per_voxel, default_block_shape, memory_budget, with_halo
 
 
 def candidate_blocks(ndim: int) -> list:

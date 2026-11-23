@@ -1,99 +1,190 @@
-# napari-segforest
+# xwiClassifier
 
-Classification interactive de pixels/voxels pour images **2D et 3D**, sous
-[napari]. Alternative libre à ilastik et à IPSDK Explorer (Reactiv'IP), conçue
-pour aller **au-delà d'ilastik** : catalogue de features ouvert et entièrement
-paramétrable, et classifieur pluggable (Random Forest par défaut, gradient
-boosting en option).
+Classification de pixels / voxels **2D et 3D** par apprentissage (features + forêts
+d'arbres), conçue comme alternative libre à **ilastik** et à **IPSDK Explorer
+(Reactiv'IP)**. Trois façons de s'en servir :
 
-## Pourquoi
+- **dans napari** : annotation au pinceau, entraînement et prédiction interactifs ;
+- **en Python** : `import xwiclassifier as xwi`, pour scripter des traitements par lots ;
+- **en ligne de commande** : `xwi predict modele.joblib volume.tif -o seg.tif`.
 
-- **Plus de features qu'ilastik** : familles et échelles (sigmas) librement
-  combinables, plus possibilité d'ajouter des features custom — pour donner au
-  Random Forest une décision plus facile et plus robuste.
-- **Rapide** : backend hybride. Filtres exécutés sur **GPU** via
-  `pyclesperanto` si une carte est disponible, sinon repli automatique sur
-  **CPU** (`scikit-image`/`scipy`). Aucun changement de code côté utilisateur.
-- **Interactif** : annotation au pinceau dans napari, entraînement, prédiction,
-  et mode *live* (réentraînement à chaque coup de pinceau).
-- **Pluggable** : `rf`, `extratrees`, `lightgbm`, `xgboost`.
+Un modèle entraîné dans napari s'utilise tel quel en script ou en ligne de
+commande, et les modèles **ilastik** (`.ilp`) se chargent directement.
 
-## Architecture
+## Points forts
 
-```
-src/napari_segforest/
-├── napari.yaml              # manifest du plugin (widgets exposés)
-├── backend.py              # abstraction CPU/GPU + primitives de filtres
-├── features/
-│   └── engine.py           # FeatureEngine + FeatureSpec (catalogue ouvert)
-├── classifier/
-│   └── base.py             # PixelClassifier (RF/boosting), fit/predict/save
-└── widgets/
-    ├── pixel_classifier.py # widget principal type ilastik
-    └── feature_explorer.py # visualisation des canaux de features
-examples/demo_3d.py         # démo headless + napari sur volume 3D
-tests/test_pipeline.py      # tests CPU sans Qt
-```
-
-Le flux : `image → FeatureEngine.compute() → pile (H,W[,D],N_features) →
-PixelClassifier.fit(pixels peints) → predict(volume) → layer Labels`.
-
-### Le moteur de features (cœur du projet)
-
-`FeatureSpec(families=..., sigmas=..., extra=[...])` décrit de façon
-reproductible le jeu de features. Familles disponibles :
-
-- **Lisses** (paramètre = sigma, en px) : `intensity`, `gaussian`, `gradient`,
-  `log` (Laplacian of Gaussian), `dog` (Difference of Gaussians),
-  `hessian_eigen`, `structure_eigen`.
-- **Morphologiques** (paramètre = rayon, en px) : `erosion`, `dilation`,
-  `opening`, `closing`, `morph_gradient` (dilatation − érosion),
-  `white_tophat` (objets clairs), `black_tophat` (objets sombres), `median`.
-
-La morphologie est calculée en n-D (2D **et** 3D) via `scipy.ndimage`, avec
-accélération GPU `pyclesperanto` si disponible. OpenCV n'est pas utilisé car il
-est limité à la 2D. Chaque famille × chaque taille produit un ou plusieurs
-canaux. Pour ajouter une feature maison :
-
-```python
-spec = FeatureSpec(
-    families=("intensity", "gaussian", "log", "hessian_eigen"),
-    sigmas=(0, 1, 2, 4, 8, 16),
-    extra=[("ma_feature", lambda img: mon_filtre(img))],
-)
-```
+- **Catalogue de features ouvert** : lissage, gradient, laplacien, DoG, valeurs
+  propres de la Hessienne et du tenseur de structure, écart-type local,
+  tubularité (fils/fibres), morphologie (érosion, dilatation, ouverture,
+  fermeture, gradient morphologique, top-hats, médian). Chaque famille se combine
+  librement avec des sigmas / rayons au choix, bien au-delà d'ilastik.
+- **Rapide et sobre en mémoire** : dérivées gaussiennes exactes, valeurs propres
+  analytiques, cache partagé par échelle, multi-thread, traitement **par blocs
+  avec halo** (résultat identique au calcul global, mémoire bornée), GPU optionnel.
+- **Robuste sur de nouvelles acquisitions** : normalisation calculée sur l'image
+  entière (pas par bloc ni par image min/max), prise en compte de l'**anisotropie**
+  (taille de voxel), filtres 2D par coupe en option.
+- **Classifieurs** : RandomForest (défaut), ExtraTrees, LightGBM, XGBoost.
+- **Import ilastik sans ilastik ni vigra** : features reproduites à l'identique et
+  forêts converties en scikit-learn ; ou ré-entraînement sur les annotations du projet.
+- **Récupération des modèles IPSDK** par distillation (voir plus bas).
 
 ## Installation
 
 ```bash
-pip install -e .              # CPU
-pip install -e ".[gpu]"       # + pyclesperanto (installer cupy selon CUDA)
-pip install -e ".[boosting]"  # + lightgbm / xgboost
+git clone https://github.com/DoctorEmmetBrown/xwiClassifier.git
+cd xwiClassifier
+python -m venv xwi-env              # le nom de l'environnement est libre
+source xwi-env/bin/activate         # Windows : xwi-env\Scripts\activate
+pip install -e ".[napari]"          # cœur + napari
 ```
 
-Forcer le CPU (debug) : `export SEGFOREST_FORCE_CPU=1`.
+Options : `.[boosting]` (LightGBM, XGBoost ; sur macOS XGBoost demande
+`brew install libomp`), `.[gpu]` (pyclesperanto), `.[zarr]`, `.[all]`, `.[dev]` (tests).
+Sans napari, `pip install -e .` suffit pour le Python et la ligne de commande.
 
-## Utilisation
+## Dans napari
 
 ```bash
-napari                        # puis Plugins → SegForest → Pixel classifier
-python examples/demo_3d.py    # démo
+napari          # puis Plugins → xwiClassifier → Classification de pixels
 ```
 
-Dans le widget : sélectionner l'image, régler le nombre de classes (1 à 5, en
-plus du **Background** créé par défaut), **renommer** chaque classe via les
-champs texte (ex. « noyau », « membrane »), cocher les familles de features et
-les sigmas, créer le layer d'annotation, cliquer une classe (sa couleur devient
-celle du pinceau), peindre, puis *Entraîner* et *Prédire*. Cocher *Mode live*
-pour un retour immédiat. Les noms de classes sont sauvegardés et rechargés avec
-le modèle (`.joblib`).
+1. choisir l'image (la taille de voxel est reprise de l'échelle du layer, ou saisie) ;
+2. régler le nombre de classes (background + jusqu'à 9), les renommer ;
+3. cliquer une classe : sa couleur devient celle du pinceau ; régler la taille du pinceau ;
+4. cocher les features (matrice famille × sigma, et famille × rayon pour la morphologie) ;
+5. **Entraîner** (prédit la coupe affichée), **Prédire tout** pour le volume entier ;
+6. *Mode live* : ré-entraînement automatique après chaque trait ; *incertitude* :
+   indique où annoter en priorité ;
+7. **Charger** un modèle `.joblib` ou un projet ilastik `.ilp` (utiliser son
+   classifieur, ou importer image + annotations pour continuer dans napari).
+
+## En Python (sans napari)
+
+```python
+import xwiclassifier as xwi
+
+# appliquer un modèle existant (xwi .joblib ou projet ilastik .ilp)
+model = xwi.load_model("modele.joblib")
+vol = xwi.read_image("volume.tif")
+seg, proba = model.predict(vol, return_proba=True)        # calcul par blocs
+xwi.write_image("segmentation.tif", seg)
+
+# entraîner
+spec = xwi.FeatureSpec.from_grid(
+    families=("gaussian", "gradient", "hessian_eigen", "structure_eigen", "variance", "ridge",
+              "white_tophat"),
+    scales=(0.7, 1.0, 1.6, 3.5, 5.0), radii=(1, 2, 4),
+    spacing=(2.0, 1.0, 1.0))                               # voxels deux fois plus épais en z
+model = xwi.PixelClassifier(spec, kind="rf", class_names={1: "fond", 2: "fils"})
+model.fit([vol1, vol2], [annot1, annot2])                  # 0 = non annoté
+print(model.feature_importances(group="family"))
+model.save("modele.joblib")
+```
+
+## En ligne de commande
+
+```bash
+xwi features                                              # familles disponibles
+xwi train --image vol.tif --labels annot.tif -o modele.joblib \
+          --spacing 2 1 1 --class-names "1=fond,2=fils"
+xwi predict modele.joblib "data/*.tif" -o resultats/ --proba --uncertainty --smooth 1
+xwi info modele.joblib                                    # description + contributions
+xwi convert projet.ilp -o modele.joblib                   # ilastik -> modèle xwi
+xwi ilastik-export projet.ilp -o annotations/             # images + annotations en TIFF
+xwi inspect fichier.(ilp|joblib|bin)                      # analyser un fichier
+```
+
+`python -m xwiclassifier ...` est équivalent à `xwi ...`. Formats lus : TIFF,
+HDF5 (`fichier.h5/dataset`), NumPy, Zarr, PNG/JPEG.
+
+## Récupérer des projets ilastik
+
+```python
+m = xwi.load_ilastik_model("projet.ilp")                         # classifieur ilastik tel quel
+m = xwi.load_ilastik_model("projet.ilp", mode="retrain")         # ré-entraîné, features xwi
+m = xwi.load_ilastik_model("projet.ilp", mode="retrain", features="ilastik")
+```
+
+- `mode="forest"` reproduit les features d'ilastik (pré-lissage, fenêtres 2σ et
+  3,5σ, noyaux de dérivée corrigés comme vigra, ordre des canaux) et convertit
+  ses forêts vigra en forêt scikit-learn aux prédictions identiques. Validé sur un
+  projet réel (ilastik 1.4, 2D) : 100 % d'accord avec les 1132 pixels annotés.
+- Les données référencées hors du projet sont recherchées à leur chemin d'origine ;
+  sinon, indiquez-les avec `raw_paths=[...]` (ou `--raw`).
+- Limite connue : la reproduction des projets **3D** suit le même code mais n'a été
+  validée que sur des projets synthétiques ; testez-la sur un de vos projets.
+
+## Récupérer des modèles IPSDK Explorer
+
+Les modèles « Smart Segmentation » d'IPSDK sont des objets `RandomForestModel`
+sérialisés dans un format binaire propriétaire non documenté : ils ne peuvent pas
+être relus directement. Deux voies :
+
+1. **Distillation** (une seule fois, avec la licence IPSDK encore active) :
+   `xwi ipsdk-distill modele.bin --image ref1.tif ref2.tif -o modele.joblib`.
+   PyIPSDK applique votre modèle, xwi échantillonne les pixels classés (les plus
+   sûrs en priorité) et entraîne un modèle équivalent, ensuite indépendant d'IPSDK.
+   L'accord est mesuré sur des pixels mis de côté.
+2. **Annotations** : exportez vos annotations IPSDK Explorer en image de labels
+   puis `xwi train`.
+
+`xwi inspect modele.bin` résume le fichier (format probable, chaînes lisibles) :
+un exemple de modèle permettrait d'aller plus loin sur le format.
+
+## Réglages de performance
+
+| Réglage | Effet |
+|---|---|
+| `XWI_MEMORY_BUDGET_GB` | budget mémoire par bloc (défaut ≈ 30 % de la RAM) ; plus grand = moins de halo recalculé |
+| `XWI_DEVICE=cpu\|gpu\|auto` / `--device` | filtres sur GPU (pyclesperanto) si disponible |
+| `spacing` | adapte les filtres à l'anisotropie (indispensable si z ≠ x,y) |
+| `compute_in_2d` | filtres coupe par coupe (volumes très anisotropes, coupes indépendantes) |
+| `normalize="percentile"` | robuste aux variations d'intensité entre acquisitions |
+| `max_samples_per_class` | plafonne les pixels d'entraînement par classe (défaut 200 000) |
+| `smooth` | lissage des probabilités avant décision (moins de bruit poivre et sel) |
+
+Résultats de benchmark et limites : voir [docs/benchmarks.md](docs/benchmarks.md).
+
+## Architecture
+
+```
+src/xwiclassifier/
+├── backend.py            filtres n-D CPU/GPU (noyaux gaussiens façon vigra, morphologie)
+├── blocks.py             découpage en blocs avec halo, budget mémoire
+├── features/
+│   ├── engine.py         FeatureSpec + FeatureEngine (catalogue ouvert, cache, threads)
+│   ├── eigen.py          valeurs propres analytiques 2x2 / 3x3
+│   └── ilastik.py        reproduction des features ilastik
+├── classifier/
+│   ├── model.py          PixelClassifier (fit, predict par blocs, importances)
+│   ├── sampler.py        échantillons d'entraînement par bloc (+ cache)
+│   ├── estimators.py     RF / ExtraTrees / LightGBM / XGBoost
+│   └── vigra_forest.py   lecture des forêts vigra et conversion scikit-learn
+├── io/                   images, modèles (.joblib v2 et v0.1), ilastik (.ilp), IPSDK
+├── cli.py                commande xwi
+└── napari/               widgets et manifeste du plugin
+```
+
+## Tests
+
+```bash
+pip install -e ".[dev]"
+pytest                                                     # cœur, ilastik, CLI
+XWI_ILASTIK_TEST_PROJECT=mon_projet.ilp pytest            # + validation sur un vrai projet
+```
+
+Les tests du widget napari nécessitent `napari` et `pytest-qt`.
+
+## Sécurité
+
+Les modèles `.joblib` reposent sur pickle : ne chargez que des modèles de confiance.
 
 ## Feuille de route
 
-- Prédiction par blocs (dask) pour gros volumes ne tenant pas en RAM.
-- Object classification (post-segmentation) façon ilastik.
-- Export des features GPU sans aller-retour mémoire.
-- Apprentissage actif (suggérer les zones à annoter).
+- auto-context (deuxième étage entraîné sur les probabilités du premier) ;
+- classification d'objets après segmentation ;
+- dérivées gaussiennes sur GPU, export ONNX des forêts ;
+- validation sur des projets ilastik 3D réels et sur un modèle IPSDK réel.
 
-[napari]: https://napari.org
-```
+Licence BSD-3-Clause.

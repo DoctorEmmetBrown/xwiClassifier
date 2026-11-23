@@ -458,12 +458,12 @@ class FeatureEngine:
             kind, p, chan, items = task
             if kind == "m":
                 ctx = _MorphoCtx(chan, self._radii(p, ndim), self.spec.morpho_shape)
-                for fam, off, n in items:
+                for fam, off, _n in items:
                     for k, arr in enumerate(ctx.compute(fam)):
                         out[..., off + k] = arr
             else:
                 ctx = _SmoothCtx(chan, factors, self.spec.truncate)
-                for fam, off, n in items:
+                for fam, off, _n in items:
                     for k, arr in enumerate(ctx.compute(fam, p)):
                         out[..., off + k] = arr
 
