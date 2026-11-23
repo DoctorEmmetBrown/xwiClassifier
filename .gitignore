@@ -1,0 +1,29 @@
+# Environnements Python
+.venv/
+venv/
+env/
+*.egg-info/
+__pycache__/
+*.py[cod]
+build/
+dist/
+
+# Caches outils
+.pytest_cache/
+pytest-cache-files-*/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# Modeles et donnees locales (ne pas versionner les gros fichiers)
+*.joblib
+*.ilp
+*.bin
+*.h5
+*.hdf5
+*.zarr/
+data/
+outputs/

@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "napari-segforest"
+version = "0.1.0"
+description = "Labellisation et classification interactive d'images 2D/3D sous napari (alternative libre a ilastik / IPSDK Explorer)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "BSD-3-Clause" }
+authors = [{ name = "Emmanuel Brun" }]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "scikit-image>=0.22",
+    "scikit-learn>=1.3",
+    "napari[all]>=0.4.19",
+    "magicgui>=0.8",
+    "qtpy",
+    "joblib",
+    "dask[array]>=2023.0",
+    "zarr>=2.16",
+    "PyYAML",
+]
+
+[project.optional-dependencies]
+# Backend GPU : installer selon la version CUDA de la machine
+gpu = [
+    "pyclesperanto-prototype>=0.24",
+    # cupy doit etre installe manuellement selon CUDA, ex: cupy-cuda12x
+]
+# Classifieurs additionnels (gradient boosting)
+boosting = [
+    "lightgbm>=4.0",
+    "xgboost>=2.0",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-qt",
+    "ruff",
+]
+
+[project.entry-points."napari.manifest"]
+napari-segforest = "napari_segforest:napari.yaml"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+napari_segforest = ["napari.yaml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

@@ -1,0 +1,15 @@
+name: napari-segforest
+display_name: SegForest
+contributions:
+  commands:
+    - id: napari-segforest.make_pixel_classifier
+      python_name: napari_segforest.widgets.pixel_classifier:PixelClassifierWidget
+      title: Pixel classifier (interactif)
+    - id: napari-segforest.make_feature_explorer
+      python_name: napari_segforest.widgets.feature_explorer:FeatureExplorerWidget
+      title: Explorateur de features
+  widgets:
+    - command: napari-segforest.make_pixel_classifier
+      display_name: Pixel classifier
+    - command: napari-segforest.make_feature_explorer
+      display_name: Feature explorer
