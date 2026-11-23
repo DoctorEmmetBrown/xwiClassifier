@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import math
 import os
 from functools import lru_cache
 
@@ -108,27 +109,65 @@ def _xyz_kwargs(prefix: str, values) -> dict:
 # Filtres gaussiens
 # --------------------------------------------------------------------------
 def kernel_radius(sigma: float, truncate: float) -> int:
-    """Rayon (en pixels) du noyau gaussien de scipy pour ``sigma``."""
-    return int(truncate * float(sigma) + 0.5)
+    """Rayon (en pixels) du noyau gaussien pour ``sigma`` (0 si sigma nul)."""
+    if sigma <= 0:
+        return 0
+    return max(int(truncate * float(sigma) + 0.5), 1)
 
 
-def gaussian(image: np.ndarray, sigma, truncate: float = 3.0, order=0) -> np.ndarray:
-    """Lissage gaussien (ou derivee gaussienne si ``order`` != 0), par axe.
+@lru_cache(maxsize=512)
+def gaussian_kernel(sigma: float, order: int, truncate: float) -> np.ndarray:
+    """Noyau 1D gaussien (ou derivee) facon vigra, rendu en poids de *correlation*.
+
+    Reproduit ``vigra::Kernel1D::initGaussian(Derivative)`` : rayon
+    ``int(truncate * sigma + 0.5)`` (au moins 1) ; pour les derivees, la
+    composante continue due a la troncature est retiree puis le noyau est
+    normalise par son moment d'ordre ``order``. Ainsi la derivee d'une zone
+    uniforme vaut exactement 0 et celle d'une rampe de pente a vaut a, meme
+    avec une fenetre courte (scipy ne fait pas cette correction).
+    """
+    sigma = float(sigma)
+    r = max(int(truncate * sigma + 0.5), 1)
+    x = np.arange(-r, r + 1, dtype=np.float64)
+    g = np.exp(-0.5 * (x / sigma) ** 2)
+    if order == 0:
+        k = g / g.sum()
+    else:
+        from numpy.polynomial.hermite_e import hermeval
+
+        k = ((-1.0 / sigma) ** order) * hermeval(x / sigma, [0] * order + [1]) * g
+        k = k - k.mean()
+        k = k / (np.sum(k * (-x) ** order) / math.factorial(order))
+    return k[::-1].copy()  # convolution (vigra) -> correlation (scipy)
+
+
+def gaussian(image: np.ndarray, sigma, truncate: float = 3.0, order=0,
+             mode: str = "reflect") -> np.ndarray:
+    """Lissage gaussien (ou derivee gaussienne si ``order`` != 0), separable, par axe.
 
     ``sigma`` et ``order`` sont des scalaires ou des tuples par axe. Un sigma
-    nul sur un axe laisse cet axe intact (utile pour le calcul en 2D par coupe).
+    nul sur un axe laisse cet axe intact (calcul en 2D par coupe).
+    ``mode="mirror"`` reproduit le traitement des bords de vigra/ilastik.
     """
     sig = np.broadcast_to(np.asarray(sigma, dtype=float), (image.ndim,))
     ordr = np.broadcast_to(np.asarray(order, dtype=int), (image.ndim,))
+    out = np.asarray(image, dtype=np.float32)
     if not np.any(ordr) and not np.any(sig > 0):
-        return np.asarray(image, dtype=np.float32)
-    if not np.any(ordr) and image.ndim in (2, 3):
-        out = _gpu_call("gaussian_blur", image, **_xyz_kwargs("sigma", sig))
-        if out is not None:
-            return out
-    return ndi.gaussian_filter(np.asarray(image, dtype=np.float32), sigma=tuple(sig),
-                               order=tuple(ordr), truncate=truncate,
-                               output=np.float32, mode="reflect")
+        return out
+    if not np.any(ordr) and image.ndim in (2, 3) and mode == "reflect":
+        res = _gpu_call("gaussian_blur", out, **_xyz_kwargs("sigma", sig))
+        if res is not None:
+            return res
+    first = True
+    for ax in range(out.ndim):
+        if sig[ax] <= 0:
+            if ordr[ax]:
+                raise ValueError("Derivee demandee sur un axe de sigma nul.")
+            continue
+        w = gaussian_kernel(float(sig[ax]), int(ordr[ax]), float(truncate))
+        out = ndi.correlate1d(out, w, axis=ax, output=np.float32, mode=mode)
+        first = False
+    return out if not first else np.array(out, copy=True)
 
 
 # --------------------------------------------------------------------------
