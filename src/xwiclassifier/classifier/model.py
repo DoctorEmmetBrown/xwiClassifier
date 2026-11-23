@@ -10,7 +10,7 @@ import numpy as np
 from ..blocks import default_block_shape, iter_blocks, normalize_region, with_halo
 from ..features import FeatureEngine, FeatureSpec, make_extractor
 from . import estimators as est_mod
-from .sampler import TrainingSampler, subsample_per_class
+from .sampler import TrainingSampler, image_fingerprint, subsample_per_class
 
 logger = logging.getLogger(__name__)
 Progress = Callable[[int, int], None] | None
@@ -50,6 +50,7 @@ class PixelClassifier:
         self.n_features_: int | None = None
         self.source: dict = {"type": "xwi"}
         self.training_info: dict = {}
+        self._memo = None  # (empreinte image, features image entiere) issues du dernier fit
 
     # ------------------------------------------------------------------
     @property
@@ -82,10 +83,13 @@ class PixelClassifier:
         sampler = sampler or TrainingSampler(self.extractor, block_shape=block_shape, cache_bytes=0)
 
         Xs, ys = [], []
+        self._memo = None
         for i, (img, lab) in enumerate(zip(images, labels)):
             img = np.asarray(img)
             key = image_keys[i] if image_keys is not None else None
             X, y = sampler.samples(img, lab, image_key=key, channel_axis=channel_axis, progress=progress)
+            if len(images) == 1 and sampler.last_full is not None:
+                self._memo = sampler.last_full
             Xs.append(X)
             ys.append(y)
             spatial = img.shape if channel_axis is None else np.delete(img.shape, channel_axis)
@@ -111,6 +115,10 @@ class PixelClassifier:
         return self
 
     # ------------------------------------------------------------------
+    def forget_features(self) -> None:
+        """Libere les features d'entrainement gardees pour la prediction."""
+        self._memo = None
+
     def _check_input(self, ndim: int, n_ch: int) -> None:
         if not self.is_fitted:
             raise RuntimeError("Modele non entraine.")
@@ -148,7 +156,10 @@ class PixelClassifier:
         sh = int(np.ceil(3 * smooth)) + 1 if smooth > 0 else 0
         halo = tuple(h + sh for h in halo)
         n_feat = self.extractor.n_features(ndim, n_ch)
-        bs = block_shape or default_block_shape(rshape, n_feat)
+        memo = None
+        if self._memo is not None and self._memo[0] == image_fingerprint(image):
+            memo = self._memo[1]  # features deja calculees lors de l'entrainement
+        bs = block_shape or (rshape if memo is not None else default_block_shape(rshape, n_feat, halo))
         bs = tuple(min(b, s) for b, s in zip(bs, rshape))
         K = len(self.classes_)
         out = np.empty(rshape + (K,), np.float32)
@@ -156,7 +167,10 @@ class PixelClassifier:
         for k, rel in enumerate(blocks):
             inner = tuple(slice(r.start + b.start, r.start + b.stop) for r, b in zip(region, rel))
             outer, local = with_halo(inner, halo, spatial)
-            feats = self.extractor.compute(img[outer], norm=norm, channel_axis=ca)
+            if memo is not None:
+                feats = memo[outer]
+            else:
+                feats = self.extractor.compute(img[outer], norm=norm, channel_axis=ca)
             if sh:
                 oshape = feats.shape[:-1]
                 mid, mlocal = with_halo(local, (sh,) * ndim, oshape)

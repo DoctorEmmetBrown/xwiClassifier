@@ -49,11 +49,29 @@ def eig3_sym(a11, a22, a33, a12, a13, a23):
     return [l1.astype(np.float32), l2.astype(np.float32), l3.astype(np.float32)]
 
 
+CHUNK = 1 << 20
+
+
 def eig_sym(components: dict, axes: tuple):
     """Valeurs propres d'un tenseur symetrique donne par ses composantes.
 
     ``components[(i, j)]`` (i <= j) pour les axes ``axes`` (2 ou 3 axes).
+    Calcul par paquets de ``CHUNK`` elements : les temporaires float64 restent bornes.
     """
+    first = next(iter(components.values()))
+    if first.size > CHUNK and len(axes) > 1:
+        shape = first.shape
+        flat = {k: np.asarray(v).reshape(-1) for k, v in components.items()}
+        outs = [np.empty(first.size, np.float32) for _ in axes]
+        for a in range(0, first.size, CHUNK):
+            part = _eig_sym({k: v[a:a + CHUNK] for k, v in flat.items()}, axes)
+            for o, p in zip(outs, part):
+                o[a:a + CHUNK] = p
+        return [o.reshape(shape) for o in outs]
+    return _eig_sym(components, axes)
+
+
+def _eig_sym(components: dict, axes: tuple):
     if len(axes) == 2:
         i, j = axes
         return eig2_sym(components[(i, i)], components[(i, j)], components[(j, j)])
