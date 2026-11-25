@@ -1,5 +1,17 @@
 # Journal des modifications
 
+## 0.4.0
+
+- Extension nnU-Net (`xwiclassifier.nnunet`, extra `[nnunet]`) : espace de travail,
+  un jeu de données par organe, ajout d'annotations partielles (label `ignore`) ou
+  de régions validées (marge de contexte ignorée), import depuis ilastik / IPSDK.
+- Préparation (`plan`, planificateurs classique / ResEnc M / L), entraînement en
+  sous-processus avec folds répartis sur plusieurs GPU ou DDP, durée réglable
+  (entraîneur `nnUNetTrainerXwi`), reprise, suivi (époque, Dice, temps restant).
+- `NnUNetSegmenter` : même interface que `PixelClassifier`, normalisation globale et
+  prédiction par blocs ; reconnu par `load_model` et `xwi predict` (`--spacing`, `--no-tta`).
+- CLI `xwi nnunet init|create|add|plan|train|status|list` ; widget napari *nnU-Net*.
+
 ## 0.3.0
 
 - Import des modèles IPSDK Explorer (dossiers Smart Segmentation) sans IPSDK : lecture de

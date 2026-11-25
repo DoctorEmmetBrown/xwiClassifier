@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xwiclassifier"
-version = "0.3.0"
+version = "0.4.0"
 description = "Classification de pixels/voxels 2D/3D (alternative libre a ilastik / IPSDK Explorer), utilisable en script, en ligne de commande ou dans napari"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,6 +25,8 @@ napari = ["napari[all]>=0.4.19", "qtpy"]
 gpu = ["pyclesperanto"]
 boosting = ["lightgbm>=4.0", "xgboost>=2.0"]
 zarr = ["zarr"]
+# nnU-Net : installer d'abord PyTorch adapte a votre CUDA (https://pytorch.org)
+nnunet = ["nnunetv2>=2.5", "SimpleITK"]
 all = ["xwiclassifier[napari,boosting,zarr]"]
 dev = ["pytest>=7.0", "ruff"]
 
@@ -42,6 +44,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "xwiclassifier.napari" = ["napari.yaml"]
+"xwiclassifier.nnunet" = ["trainers/*.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

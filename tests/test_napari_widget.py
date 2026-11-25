@@ -151,3 +151,33 @@ def test_adopt_ipsdk_model(widget, tmp_path):
     w._adopt_model(load_ipsdk_model(str(tmp_path / "m")))
     assert w._class_buttons[2].text() == "Fils"
     assert w.importance_list.count() > 0
+
+
+def test_nnunet_widget_builds_dataset(qtbot, tmp_path):
+    pytest.importorskip("SimpleITK")
+    from napari.components import ViewerModel
+
+    from conftest import toy_3d
+    from xwiclassifier.napari.widgets.nnunet_widget import NnUNetWidget
+
+    viewer = ViewerModel()
+    v, lab = toy_3d()
+    viewer.add_image(v, name="vol", scale=(2.0, 1.0, 1.0))
+    lyr = viewer.add_labels(lab, name="annotations")
+    lyr.metadata["xwi_class_names"] = {1: "fond", 2: "objet"}
+    w = NnUNetWidget(viewer)
+    qtbot.addWidget(w)
+    w.root_edit.setText(str(tmp_path / "ws"))
+    w._open_workspace()
+    ds = w._new_dataset(name="Rein test", classes={1: "fond", 2: "objet"})
+    assert ds is not None and w.ds_combo.currentText() == ds.name
+    w.img_combo.setCurrentText("vol")
+    w.lab_combo.setCurrentText("annotations")
+    w._add_case()
+    w.rb_dense.setChecked(True)
+    w.z0.setValue(5)
+    w.z1.setValue(14)
+    w._add_case()
+    ds = w._dataset()
+    assert ds.n_cases == 2 and [c["mode"] for c in ds.cases()] == ["sparse", "dense"]
+    assert ds.cases()[0]["spacing"] == [2.0, 1.0, 1.0]

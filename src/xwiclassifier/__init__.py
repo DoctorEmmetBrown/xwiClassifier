@@ -17,7 +17,7 @@ import os as _os
 
 _os.environ.setdefault("KMP_WARNINGS", "0")  # message OpenMP informatif de LightGBM
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 from .backend import backend_name, gpu_available, set_device  # noqa: E402,F401
 from .classifier import (  # noqa: E402,F401

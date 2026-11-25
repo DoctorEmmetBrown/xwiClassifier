@@ -41,7 +41,8 @@ pip install -e ".[napari]"          # cœur + napari
 ```
 
 Options : `.[boosting]` (LightGBM, XGBoost ; sur macOS XGBoost demande
-`brew install libomp`), `.[gpu]` (pyclesperanto), `.[zarr]`, `.[all]`, `.[dev]` (tests).
+`brew install libomp`), `.[gpu]` (pyclesperanto), `.[nnunet]` (apprentissage profond,
+voir docs/nnunet.md), `.[zarr]`, `.[all]`, `.[dev]` (tests).
 Sans napari, `pip install -e .` suffit pour le Python et la ligne de commande.
 
 ## Dans napari
@@ -136,6 +137,23 @@ annotations. Détails, correspondances et limites : [docs/ipsdk.md](docs/ipsdk.m
 
 Pour un fichier `.bin` isolé, sans son dossier : `xwi ipsdk-distill` (PyIPSDK requis).
 
+## Apprentissage profond (nnU-Net)
+
+Pour les structures difficiles (arbre vasculaire, glomérules…) et un modèle par
+organe : extension nnU-Net (`pip install -e ".[nnunet]"`, GPU NVIDIA conseillé).
+Les annotations xwi, ilastik ou IPSDK (partielles ou régions validées) alimentent
+un jeu de données par organe ; l'entraînement répartit les folds sur vos GPU ; la
+prédiction par blocs s'applique à des volumes et séries entiers.
+
+```bash
+xwi nnunet create "Rein vaisseaux" --classes "1=fond,2=vaisseaux"
+xwi nnunet add 501 --image vol.tif --labels annotations.tif --spacing 2 2 2
+xwi nnunet plan 501 && xwi nnunet train 501 --epochs 250
+xwi predict ~/xwi_nnunet/nnUNet_results/Dataset501_ReinVaisseaux "serie/*.tif" -o seg/
+```
+
+Détails : [docs/nnunet.md](docs/nnunet.md). Widget napari : *nnU-Net*.
+
 ## Réglages de performance
 
 | Réglage | Effet |
@@ -167,6 +185,7 @@ src/xwiclassifier/
 │   ├── estimators.py     RF / ExtraTrees / LightGBM / XGBoost
 │   └── vigra_forest.py   lecture des forêts vigra et conversion scikit-learn
 ├── io/                   images, modèles (.joblib v2 et v0.1), ilastik (.ilp), IPSDK Explorer
+├── nnunet/               extension nnU-Net (jeux de données, entraînement, prédiction par blocs)
 ├── cli.py                commande xwi
 └── napari/               widgets et manifeste du plugin
 ```

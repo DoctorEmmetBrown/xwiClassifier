@@ -61,6 +61,9 @@ def load_model(path: str, **kwargs):
     path = os.fspath(path)
     low = path.lower()
     from .ipsdk_explorer import is_ipsdk_model_folder
+    if _is_nnunet(path):
+        from ..nnunet.inference import NnUNetSegmenter
+        return NnUNetSegmenter(path, **kwargs)
     if os.path.isdir(path) or low.endswith(".mho"):
         if is_ipsdk_model_folder(path):
             from .ipsdk_explorer import load_ipsdk_model
@@ -86,6 +89,24 @@ def load_model(path: str, **kwargs):
     if isinstance(payload, dict) and "model" in payload and "spec" in payload:
         return _from_legacy(payload)
     raise ValueError(f"{path} : format de modele non reconnu.")
+
+
+def _is_nnunet(path: str) -> bool:
+    """Dossier de modele nnU-Net, dossier de resultats d'un jeu, ou pointeur .json xwi-nnunet."""
+    import json
+    from pathlib import Path
+
+    p = Path(path)
+    if p.is_file() and p.suffix == ".json":
+        try:
+            return json.loads(p.read_text()).get("format") == "xwi-nnunet"
+        except Exception:
+            return False
+    if p.is_dir():
+        if (p / "plans.json").exists() and (p / "dataset.json").exists():
+            return True
+        return any((m / "plans.json").exists() for m in p.glob("*__*__*"))
+    return False
 
 
 def _from_payload(d: dict):

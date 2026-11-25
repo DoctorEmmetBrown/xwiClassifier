@@ -48,6 +48,9 @@ def _load(args):
         kw = {"mode": getattr(args, "ilastik_mode", "forest")}
         if getattr(args, "raw", None):
             kw["raw_paths"] = args.raw
+    from .io.models import _is_nnunet
+    if _is_nnunet(args.model) and getattr(args, "no_tta", False):
+        kw["use_mirroring"] = False
     model = load_model(args.model, **kw)
     _report_ipsdk(model)
     return model
@@ -75,9 +78,10 @@ def cmd_predict(args) -> int:
         img = read_image(path, key=args.key)
         print(f"{path} : {img.shape} {img.dtype}")
         nd = img.ndim - (1 if args.channel_axis is not None else 0)
+        kw = {"spacing": tuple(args.spacing)} if args.spacing and getattr(model, "kind", "") == "nnunet" else {}
         proba = model.predict_proba(img, channel_axis=args.channel_axis,
                                     block_shape=block[:nd] if block else None,
-                                    smooth=args.smooth, progress=_progress("prediction"))
+                                    smooth=args.smooth, progress=_progress("prediction"), **kw)
         seg = labels_from_proba(proba, model.classes_)
         if args.ipsdk_values:
             from .io.ipsdk_explorer import ipsdk_output_values
@@ -264,7 +268,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("predict", help="segmenter une ou plusieurs images avec un modele")
-    p.add_argument("model", help="modele .joblib (xwi), projet ilastik .ilp ou dossier IPSDK Explorer")
+    p.add_argument("model", help="modele .joblib (xwi), projet ilastik .ilp, dossier IPSDK Explorer ou modele nnU-Net")
     p.add_argument("inputs", nargs="+", help="images (TIFF, HDF5, npy... ; motifs glob acceptes)")
     p.add_argument("-o", "--output", required=True, help="fichier (une image) ou dossier de sortie")
     p.add_argument("--proba", action="store_true", help="ecrire aussi les probabilites")
@@ -276,6 +280,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--format", default="tif", help="format des sorties (tif, npy, h5)")
     p.add_argument("--ilastik-mode", choices=("forest", "retrain"), default="forest")
     p.add_argument("--raw", nargs="*", help="chemins des donnees ilastik si deplacees")
+    p.add_argument("--spacing", nargs="+", type=float, default=None,
+                   help="taille de voxel (z y x) pour un modele nnU-Net (defaut : celle de l'entrainement)")
+    p.add_argument("--no-tta", action="store_true",
+                   help="modele nnU-Net : sans augmentation par miroirs (8x plus rapide, un peu moins precis)")
     p.add_argument("--ipsdk-values", action="store_true",
                    help="modele IPSDK Explorer : ecrire les valeurs de sortie d'IPSDK (champ Value)")
     p.set_defaults(func=cmd_predict)
@@ -333,6 +341,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--classifier", default="rf")
     p.add_argument("--channel-axis", type=int, default=None)
     p.set_defaults(func=cmd_ipsdk_distill)
+
+    from .nnunet.cli import add_nnunet_parser
+    add_nnunet_parser(sub)
 
     p = sub.add_parser("features", help="lister les familles de features disponibles")
     p.set_defaults(func=cmd_features)

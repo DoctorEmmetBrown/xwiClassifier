@@ -386,6 +386,10 @@ class PixelClassifierWidget(QWidget):
         for lyr in (self._labels_layer, self._result_layer):
             if self._has_layer(lyr):
                 apply_to_layer(lyr, cols)
+                # partage avec les autres widgets (ex. nnU-Net) : noms et couleurs des classes
+                lyr.metadata["xwi_class_names"] = {int(v): self.class_names.get(v, self._default_name(v))
+                                                   for v in self._class_values()}
+                lyr.metadata["xwi_class_colors"] = {int(k): tuple(c) for k, c in cols.items()}
 
     def _ensure_labels_layer(self):
         data, ch = self._image()

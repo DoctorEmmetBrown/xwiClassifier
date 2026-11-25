@@ -8,8 +8,13 @@ contributions:
     - id: xwiclassifier.feature_explorer
       python_name: xwiclassifier.napari.widgets.feature_explorer:FeatureExplorerWidget
       title: Explorateur de features
+    - id: xwiclassifier.nnunet
+      python_name: xwiclassifier.napari.widgets.nnunet_widget:NnUNetWidget
+      title: nnU-Net (apprentissage profond)
   widgets:
     - command: xwiclassifier.pixel_classifier
       display_name: Classification de pixels
     - command: xwiclassifier.feature_explorer
       display_name: Explorateur de features
+    - command: xwiclassifier.nnunet
+      display_name: nnU-Net (apprentissage profond)
