@@ -139,3 +139,15 @@ def test_adopt_ilastik_model(widget):
     w._adopt_model(load_ilastik_model(path))
     assert w.model.source["type"] == "ilastik"
     assert w._class_buttons[1].text() == w.model.class_label(1)
+
+
+def test_adopt_ipsdk_model(widget, tmp_path):
+    from conftest import make_fake_ipsdk_model, toy_2d
+    from xwiclassifier.io.ipsdk_explorer import load_ipsdk_model
+
+    img, lab = toy_2d()
+    make_fake_ipsdk_model(str(tmp_path / "m"), [img], [lab], names=("Fond", "Fils"))
+    _, w = widget
+    w._adopt_model(load_ipsdk_model(str(tmp_path / "m")))
+    assert w._class_buttons[2].text() == "Fils"
+    assert w.importance_list.count() > 0

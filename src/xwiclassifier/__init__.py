@@ -4,7 +4,7 @@ Utilisation sans napari ::
 
     import xwiclassifier as xwi
 
-    model = xwi.load_model("modele.joblib")      # ou "projet.ilp" (ilastik)
+    model = xwi.load_model("modele.joblib")      # ou "projet.ilp", ou un dossier IPSDK Explorer
     seg = model.predict(volume)                   # calcul par blocs, memoire bornee
     seg, proba = model.predict(volume, return_proba=True)
 
@@ -17,7 +17,7 @@ import os as _os
 
 _os.environ.setdefault("KMP_WARNINGS", "0")  # message OpenMP informatif de LightGBM
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 from .backend import backend_name, gpu_available, set_device  # noqa: E402,F401
 from .classifier import (  # noqa: E402,F401
@@ -31,6 +31,8 @@ from .features.ilastik import IlastikFeatures  # noqa: E402,F401
 from .io import load_model, read_image, save_model, write_image  # noqa: E402,F401
 from .io.ilastik_project import IlastikProject, ilastik_annotations, load_ilastik_model  # noqa: E402,F401
 from .io.ipsdk import distill_ipsdk_model, inspect_binary  # noqa: E402,F401
+from .io.ipsdk_explorer import ipsdk_annotations, load_ipsdk_model  # noqa: E402,F401
+from .features.ipsdk import IPSDKFeatures  # noqa: E402,F401
 
 
 def predict(model, image, **kwargs):

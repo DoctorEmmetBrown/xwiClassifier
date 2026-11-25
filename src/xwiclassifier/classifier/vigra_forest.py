@@ -22,6 +22,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .forest_build import forest_from_trees, tree_from_arrays
+
 LEAF_TAG = 0x40000000
 THRESHOLD_NODE = 0
 CONST_PROB_LEAF = LEAF_TAG
@@ -120,78 +122,22 @@ def _strict_to_le(threshold: np.ndarray) -> np.ndarray:
     return t32.astype(np.float64)
 
 
-_TEMPLATE = None
-
-
-def _template_state():
-    global _TEMPLATE
-    if _TEMPLATE is None:
-        from sklearn.tree import DecisionTreeClassifier
-
-        tree = DecisionTreeClassifier(max_depth=1, random_state=0).fit([[0.0], [1.0]], [0, 1]).tree_
-        _TEMPLATE = tree.__getstate__()
-    return _TEMPLATE
-
-
 def _to_sklearn_tree(vt: VigraTree, n_features: int, n_classes: int):
-    from sklearn.tree import DecisionTreeClassifier
-    from sklearn.tree._tree import Tree
-
     n = vt.n_nodes
     # effectifs par noeud : feuilles = poids x probas, noeuds internes = somme des enfants
     counts = vt.proba * vt.weight[:, None]
-    depth = np.zeros(n, np.int64)
-    for k in range(n):  # ordre prefixe : parents avant enfants
-        if vt.left[k] >= 0:
-            depth[vt.left[k]] = depth[vt.right[k]] = depth[k] + 1
-    for k in range(n - 1, -1, -1):  # enfants avant parents
+    for k in range(n - 1, -1, -1):  # ordre prefixe inverse : enfants avant parents
         if vt.left[k] >= 0:
             counts[k] = counts[vt.left[k]] + counts[vt.right[k]]
-    tot = counts.sum(1)
-    safe = np.where(tot > 0, tot, 1.0)
-    frac = counts / safe[:, None]
-    impurity = 1.0 - (frac ** 2).sum(1)
     leaf = vt.left < 0
-    frac[leaf] = vt.proba[leaf] / np.maximum(vt.proba[leaf].sum(1, keepdims=True), 1e-300)
-
-    state = dict(_template_state())
-    nodes = np.zeros(n, dtype=state["nodes"].dtype)
-    fields = nodes.dtype.names
-    nodes["left_child"] = vt.left
-    nodes["right_child"] = vt.right
-    nodes["feature"] = vt.feature
+    values = counts.copy()
+    values[leaf] = vt.proba[leaf]
     thr = np.full(n, -2.0)
     thr[~leaf] = _strict_to_le(vt.threshold[~leaf])
-    nodes["threshold"] = thr
-    nodes["impurity"] = impurity
-    nodes["n_node_samples"] = np.maximum(np.rint(tot), 1).astype(nodes["n_node_samples"].dtype)
-    nodes["weighted_n_node_samples"] = np.maximum(tot, 1e-12)
-    if "missing_go_to_left" in fields:
-        nodes["missing_go_to_left"] = 0
-    state.update(max_depth=int(depth.max()), node_count=n, nodes=nodes,
-                 values=np.ascontiguousarray(frac.reshape(n, 1, n_classes), dtype=np.float64))
-    tree = Tree(n_features, np.array([n_classes], dtype=np.intp), 1)
-    tree.__setstate__(state)
-    dt = DecisionTreeClassifier()
-    dt.tree_ = tree
-    dt.n_outputs_ = 1
-    dt.n_classes_ = n_classes
-    dt.classes_ = np.arange(n_classes)
-    dt.n_features_in_ = n_features
-    dt.max_features_ = n_features
-    return dt
+    return tree_from_arrays(vt.left, vt.right, vt.feature, thr, counts, values, n_features, n_classes)
 
 
 def to_sklearn_forest(trees, n_features: int, n_classes: int, n_jobs: int = -1):
     """Assemble tous les arbres (de toutes les forets) en une RandomForestClassifier."""
-    from sklearn.ensemble import RandomForestClassifier
-    from sklearn.tree import DecisionTreeClassifier
-
-    rf = RandomForestClassifier(n_estimators=len(trees), n_jobs=n_jobs)
-    rf.estimators_ = [_to_sklearn_tree(t, n_features, n_classes) for t in trees]
-    rf.estimator_ = DecisionTreeClassifier()
-    rf.n_outputs_ = 1
-    rf.n_classes_ = n_classes
-    rf.classes_ = np.arange(n_classes)
-    rf.n_features_in_ = n_features
-    return rf
+    return forest_from_trees([_to_sklearn_tree(t, n_features, n_classes) for t in trees],
+                             n_features, n_classes, n_jobs)

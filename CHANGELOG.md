@@ -1,5 +1,18 @@
 # Journal des modifications
 
+## 0.3.0
+
+- Import des modèles IPSDK Explorer (dossiers Smart Segmentation) sans IPSDK : lecture de
+  `Settings.mho`, de la forêt scikit-learn `Model` quelle que soit sa version (pickles 0.24
+  compris), des images et annotations ; vérification et calibration sur les annotations.
+- Extracteur `IPSDKFeatures` reproduisant la grille de features IPSDK (Gaussian, Mean,
+  Laplacian Difference, High Pass, Variance, Erosion, Dilation, Opening, Closing,
+  dimension 2D/3D, multi-résolution).
+- Nouvelles familles xwi transcrites d'IPSDK : `mean`, `high_pass`, `box_variance` ;
+  morphologie `morpho_shape="exact"` (disque/boule identiques à IPSDK).
+- CLI : `predict`/`convert`/`inspect`/`info` acceptent un dossier IPSDK, `ipsdk-export`,
+  option `--ipsdk-values` ; napari : chargement d'un dossier de modèle IPSDK.
+
 ## 0.2.0
 
 - Paquet renommé `xwiclassifier` ; le cœur ne dépend plus de napari.

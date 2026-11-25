@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xwiclassifier"
-version = "0.2.0"
+version = "0.3.0"
 description = "Classification de pixels/voxels 2D/3D (alternative libre a ilastik / IPSDK Explorer), utilisable en script, en ligne de commande ou dans napari"
 readme = "README.md"
 requires-python = ">=3.10"

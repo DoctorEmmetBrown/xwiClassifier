@@ -60,15 +60,23 @@ def load_model(path: str, **kwargs):
     """
     path = os.fspath(path)
     low = path.lower()
+    from .ipsdk_explorer import is_ipsdk_model_folder
+    if os.path.isdir(path) or low.endswith(".mho"):
+        if is_ipsdk_model_folder(path):
+            from .ipsdk_explorer import load_ipsdk_model
+            return load_ipsdk_model(path, **kwargs)
+        raise ValueError(f"{path} : dossier non reconnu (ni modele IPSDK Explorer, ni modele xwi).")
     if low.endswith(".ilp"):
         from .ilastik_project import load_ilastik_model
         return load_ilastik_model(path, **kwargs)
     if low.endswith(".bin"):
+        folder = os.path.dirname(os.path.abspath(path))
+        if is_ipsdk_model_folder(folder):  # ModelIPSDK.bin dans un dossier de modele Explorer
+            from .ipsdk_explorer import load_ipsdk_model
+            return load_ipsdk_model(folder, **kwargs)
         raise ValueError(
-            "Modele IPSDK (.bin) : format binaire proprietaire non documente. Utilisez "
-            "`xwi ipsdk-distill` (necessite PyIPSDK et votre licence actuelle) ou exportez "
-            "vos annotations en image de labels puis `xwi train`. `xwi inspect` aide a "
-            "analyser le fichier.")
+            "Fichier IPSDK .bin isole : format binaire proprietaire. Donnez plutot le dossier du "
+            "modele IPSDK Explorer (Settings.mho + Model), ou utilisez `xwi ipsdk-distill`.")
     import joblib
 
     with _legacy_modules():

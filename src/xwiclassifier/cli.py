@@ -48,7 +48,16 @@ def _load(args):
         kw = {"mode": getattr(args, "ilastik_mode", "forest")}
         if getattr(args, "raw", None):
             kw["raw_paths"] = args.raw
-    return load_model(args.model, **kw)
+    model = load_model(args.model, **kw)
+    _report_ipsdk(model)
+    return model
+
+
+def _report_ipsdk(model):
+    src = model.source or {}
+    if src.get("type") == "ipsdk-explorer" and src.get("annotation_agreement") is not None:
+        print(f"Modele IPSDK Explorer : accord avec ses annotations {100 * src['annotation_agreement']:.2f}% "
+              f"(confiance moyenne {100 * src.get('annotation_confidence', 0):.2f}%)")
 
 
 # --------------------------------------------------------------------------
@@ -70,12 +79,16 @@ def cmd_predict(args) -> int:
                                     block_shape=block[:nd] if block else None,
                                     smooth=args.smooth, progress=_progress("prediction"))
         seg = labels_from_proba(proba, model.classes_)
+        if args.ipsdk_values:
+            from .io.ipsdk_explorer import ipsdk_output_values
+            seg = ipsdk_output_values(model, seg)
         stem = os.path.splitext(os.path.basename(path))[0]
         ext = "." + args.format
         seg_path = os.path.join(args.output, stem + "_seg" + ext) if multi else args.output
         write_image(seg_path, seg)
+        lab = labels_from_proba(proba, model.classes_) if args.ipsdk_values else seg
         print(f"  -> {seg_path}  " + ", ".join(
-            f"{model.class_label(c)}: {100 * (seg == c).mean():.1f}%" for c in model.classes_))
+            f"{model.class_label(c)}: {100 * (lab == c).mean():.1f}%" for c in model.classes_))
         base = os.path.splitext(seg_path)[0].removesuffix("_seg")
         if args.proba:
             write_image(base + "_proba" + ext, np.moveaxis(proba, -1, 0))
@@ -116,13 +129,15 @@ def cmd_convert(args) -> int:
     from .features import FeatureSpec
 
     kw = {}
-    if args.model.lower().endswith(".ilp"):
+    is_dir = os.path.isdir(args.model) or args.model.lower().endswith(".mho")
+    if args.model.lower().endswith(".ilp") or is_dir:
         kw["mode"] = args.mode
         if args.mode == "retrain":
-            kw["features"] = "ilastik" if args.features == "ilastik" else FeatureSpec()
-        if args.raw:
+            kw["features"] = args.features if args.features in ("ilastik", "ipsdk", "equivalent") else FeatureSpec()
+        if args.raw and not is_dir:
             kw["raw_paths"] = args.raw
     model = load_model(args.model, **kw)
+    _report_ipsdk(model)
     model.save(args.output)
     print(model.describe())
     print(f"Modele converti : {args.output}")
@@ -146,6 +161,22 @@ def _print_importances(model, top: int) -> None:
 
 def cmd_inspect(args) -> int:
     low = args.path.lower()
+    from .io.ipsdk_explorer import is_ipsdk_model_folder
+    if (os.path.isdir(args.path) or low.endswith(".mho")) and is_ipsdk_model_folder(args.path):
+        from .io.ipsdk_explorer import _resolve_folder, ipsdk_annotations, read_settings
+        folder = _resolve_folder(args.path)
+        st = read_settings(folder)
+        anns = ipsdk_annotations(folder)
+        info = {"type": "modele IPSDK Explorer", "dossier": folder, "dimension": st["dimension"],
+                "tailles": st["sizes"], "resolutions": st["resolutions"],
+                "filtres": {n: [s for s, f in zip(st["sizes"], st["flags"][n]) if f] for n in st["order"]},
+                "classes": st["classes"],
+                "foret_sklearn": os.path.exists(os.path.join(folder, "Model")),
+                "images": [{"nom": a["name"], "forme": list(a["image"].shape),
+                            "pixels_annotes": 0 if a["labels"] is None else int((a["labels"] > 0).sum())}
+                           for a in anns]}
+        print(json.dumps(info, indent=2, ensure_ascii=False))
+        return 0
     if low.endswith(".ilp"):
         from .io.ilastik_project import IlastikProject
 
@@ -187,6 +218,22 @@ def cmd_ilastik_export(args) -> int:
     return 0
 
 
+def cmd_ipsdk_export(args) -> int:
+    from .io import write_image
+    from .io.ipsdk_explorer import ipsdk_annotations, read_settings, _resolve_folder
+
+    os.makedirs(args.output, exist_ok=True)
+    for a in ipsdk_annotations(args.model):
+        write_image(os.path.join(args.output, f"{a['name']}_image.tif"), a["image"])
+        if a["labels"] is not None:
+            write_image(os.path.join(args.output, f"{a['name']}_labels.tif"), a["labels"])
+        print(f"{a['name']} : image {a['image'].shape}, annotations "
+              f"{'aucune' if a['labels'] is None else int((a['labels'] > 0).sum())} pixels")
+    st = read_settings(_resolve_folder(args.model))
+    print("Classes :", ", ".join(f"{c['index'] + 1}={c['name']}" for c in st["classes"]))
+    return 0
+
+
 def cmd_ipsdk_distill(args) -> int:
     from .io import read_image
     from .io.ipsdk import distill_ipsdk_model
@@ -217,7 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("predict", help="segmenter une ou plusieurs images avec un modele")
-    p.add_argument("model", help="modele .joblib (xwi) ou projet ilastik .ilp")
+    p.add_argument("model", help="modele .joblib (xwi), projet ilastik .ilp ou dossier IPSDK Explorer")
     p.add_argument("inputs", nargs="+", help="images (TIFF, HDF5, npy... ; motifs glob acceptes)")
     p.add_argument("-o", "--output", required=True, help="fichier (une image) ou dossier de sortie")
     p.add_argument("--proba", action="store_true", help="ecrire aussi les probabilites")
@@ -229,6 +276,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--format", default="tif", help="format des sorties (tif, npy, h5)")
     p.add_argument("--ilastik-mode", choices=("forest", "retrain"), default="forest")
     p.add_argument("--raw", nargs="*", help="chemins des donnees ilastik si deplacees")
+    p.add_argument("--ipsdk-values", action="store_true",
+                   help="modele IPSDK Explorer : ecrire les valeurs de sortie d'IPSDK (champ Value)")
     p.set_defaults(func=cmd_predict)
 
     p = sub.add_parser("train", help="entrainer un modele depuis images + images de labels")
@@ -247,12 +296,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--channel-axis", type=int, default=None)
     p.set_defaults(func=cmd_train)
 
-    p = sub.add_parser("convert", help="convertir un projet ilastik / ancien modele en modele xwi")
-    p.add_argument("model")
+    p = sub.add_parser("convert", help="convertir ilastik / IPSDK Explorer / ancien modele en modele xwi")
+    p.add_argument("model", help="projet .ilp, dossier de modele IPSDK Explorer ou ancien .joblib")
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--mode", choices=("forest", "retrain"), default="forest")
-    p.add_argument("--features", choices=("xwi", "ilastik"), default="xwi",
-                   help="jeu de features pour --mode retrain")
+    p.add_argument("--features", choices=("xwi", "ilastik", "ipsdk", "equivalent"), default="xwi",
+                   help="jeu de features pour --mode retrain (ipsdk/equivalent : modeles IPSDK)")
     p.add_argument("--raw", nargs="*", help="chemins des donnees ilastik si deplacees")
     p.set_defaults(func=cmd_convert)
 
@@ -270,6 +319,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--raw", nargs="*")
     p.set_defaults(func=cmd_ilastik_export)
+
+    p = sub.add_parser("ipsdk-export", help="exporter images + annotations d'un modele IPSDK Explorer")
+    p.add_argument("model", help="dossier du modele (contenant Settings.mho)")
+    p.add_argument("-o", "--output", required=True)
+    p.set_defaults(func=cmd_ipsdk_export)
 
     p = sub.add_parser("ipsdk-distill", help="reproduire un modele IPSDK (.bin) avec PyIPSDK")
     p.add_argument("model")

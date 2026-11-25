@@ -103,7 +103,11 @@ class TrainingSampler:
         ca = -1 if channel_axis is not None else None
         if norm is None:
             norm = self.extractor.fit_normalization(img, channel_axis=ca)
-        bs, blocks = self._plan(spatial, coords, halo, n_feat, image_key)
+        if getattr(self.extractor, "requires_full_image", False):
+            bs, blocks = spatial, [tuple(slice(0, s) for s in spatial)]
+            halo = (0,) * ndim
+        else:
+            bs, blocks = self._plan(spatial, coords, halo, n_feat, image_key)
         whole = len(blocks) == 1 and all(x.start == 0 and x.stop == s for x, s in zip(blocks[0], spatial))
         self.last_full = None
 

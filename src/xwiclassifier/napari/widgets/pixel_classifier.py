@@ -226,6 +226,11 @@ class PixelClassifierWidget(QWidget):
         b = QPushButton("Charger (.joblib / .ilp)...")
         b.clicked.connect(self._load_model)
         g.addWidget(b, 0, 1)
+        b = QPushButton("Dossier de modele IPSDK Explorer...")
+        b.setToolTip("Dossier contenant Settings.mho et Model (AppData/Roaming/ReactivIP/Explorer/"
+                     "Machine_Learning/Pixel_Classification/<modele>)")
+        b.clicked.connect(self._load_ipsdk_folder)
+        g.addWidget(b, 2, 0, 1, 2)
         self.ipsdk_btn = QPushButton("Distiller un modele IPSDK (.bin)...")
         self.ipsdk_btn.clicked.connect(self._distill_ipsdk)
         from ...io.ipsdk import ipsdk_available
@@ -677,11 +682,13 @@ class PixelClassifierWidget(QWidget):
 
     def _load_model(self):
         path, _ = QFileDialog.getOpenFileName(self, "Charger un modele", "",
-                                              "Modeles (*.joblib *.ilp);;Tous (*)")
+                                              "Modeles (*.joblib *.ilp Settings.mho);;Tous (*)")
         if not path:
             return
         try:
-            if path.lower().endswith(".ilp"):
+            if path.lower().endswith(".mho"):
+                self._load_ipsdk(path)
+            elif path.lower().endswith(".ilp"):
                 self._load_ilastik(path)
             else:
                 from ...io import load_model
@@ -723,6 +730,52 @@ class PixelClassifierWidget(QWidget):
                 self._sampler = None
                 self._apply_palettes()
             self.status.setText(f"Annotations ilastik importees ({len(names)} classes). "
+                                "Cliquez Entrainer pour apprendre avec les features xwi.")
+
+    def _load_ipsdk_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Dossier de modele IPSDK Explorer")
+        if folder:
+            try:
+                self._load_ipsdk(folder)
+            except Exception as exc:
+                self.status.setText(f"Chargement impossible : {exc}")
+
+    def _load_ipsdk(self, path):
+        from ...io.ipsdk_explorer import ipsdk_annotations, load_ipsdk_model, read_settings, _resolve_folder
+
+        folder = _resolve_folder(path)
+        box = QMessageBox(self)
+        box.setWindowTitle("Modele IPSDK Explorer")
+        box.setText("Que faire de ce modele IPSDK Explorer ?")
+        b_forest = box.addButton("Utiliser sa foret", QMessageBox.AcceptRole)
+        b_ann = box.addButton("Importer images + annotations", QMessageBox.ActionRole)
+        box.addButton("Annuler", QMessageBox.RejectRole)
+        box.exec_() if hasattr(box, "exec_") else box.exec()
+        clicked = box.clickedButton()
+        if clicked is b_forest:
+            m = load_ipsdk_model(folder)
+            self._adopt_model(m)
+            agr = m.source.get("annotation_agreement")
+            self.status.setText("Modele IPSDK charge (features IPSDK reproduites)"
+                                + (f" : {100 * agr:.1f}% d'accord avec ses annotations." if agr is not None else "."))
+        elif clicked is b_ann:
+            st = read_settings(folder)
+            names = {c["index"] + 1: c["name"] for c in st["classes"]}
+            colors = {c["index"] + 1: to_rgba01(c["color"]) for c in st["classes"] if c["color"]}
+            anns = ipsdk_annotations(folder)
+            for a in anns:
+                self.viewer.add_image(a["image"], name=a["name"], rgb=a["channel_axis"] == -1)
+            self._refresh_image_combo()
+            if anns:
+                self.image_combo.setCurrentText(anns[0]["name"])
+            self._set_classes(names, colors)
+            if anns and anns[0]["labels"] is not None:
+                self._labels_layer = self.viewer.add_labels(anns[0]["labels"].astype(np.uint8), name="annotations")
+                if hasattr(self._labels_layer.events, "paint"):
+                    self._labels_layer.events.paint.connect(self._on_paint)
+                self._sampler = None
+                self._apply_palettes()
+            self.status.setText(f"{len(anns)} image(s) IPSDK importee(s), {len(names)} classes. "
                                 "Cliquez Entrainer pour apprendre avec les features xwi.")
 
     def _set_classes(self, names: dict, colors: dict):

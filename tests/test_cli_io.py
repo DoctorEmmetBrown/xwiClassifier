@@ -70,3 +70,24 @@ def test_inspect_binary(tmp_path):
     p.write_bytes(b"\x16\x00serialization::archive\x00RandomForestModel\x00" + bytes(range(256)))
     info = inspect_binary(str(p))
     assert info["format"].startswith("archive boost") and "RandomForestModel" in info["keywords"]
+
+
+def test_cli_ipsdk_folder(tmp_path, capsys):
+    from conftest import make_fake_ipsdk_model, toy_2d
+    from xwiclassifier import load_model
+
+    img, lab = toy_2d()
+    folder = str(tmp_path / "modele")
+    make_fake_ipsdk_model(folder, [img], [lab])
+    write_image(tmp_path / "a.tif", img)
+    assert main(["predict", folder, str(tmp_path / "a.tif"), "-o", str(tmp_path / "s.tif"), "--ipsdk-values"]) == 0
+    assert set(np.unique(read_image(tmp_path / "s.tif"))) <= {0, 1}
+    assert main(["convert", folder, "-o", str(tmp_path / "c.joblib")]) == 0
+    m = load_model(str(tmp_path / "c.joblib"))
+    assert m.extractor.kind == "ipsdk" and m.predict(img)[48, 56] == 2
+    assert main(["convert", folder, "-o", str(tmp_path / "r.joblib"), "--mode", "retrain",
+                 "--features", "equivalent"]) == 0
+    assert main(["ipsdk-export", folder, "-o", str(tmp_path / "exp")]) == 0
+    capsys.readouterr()
+    assert main(["inspect", folder]) == 0
+    assert '"foret_sklearn": true' in capsys.readouterr().out

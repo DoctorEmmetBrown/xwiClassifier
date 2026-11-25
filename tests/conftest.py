@@ -160,3 +160,109 @@ def make_fake_ilp(path, image, labels, train_forest=True, internal=True, raw_fil
             cf["feature_names"] = [n.encode() for n in feats.channel_names(nd)]
             return rf, feats
     return None, feats
+
+
+# --------------------------------------------------------------------------
+# Dossiers de modele IPSDK Explorer factices (format de Settings.mho 4.0)
+# --------------------------------------------------------------------------
+def _ascii(text):
+    return ".".join(str(ord(c)) for c in text)
+
+
+def write_ipsdk_settings(folder, sizes, flags, dimension="2D", multires=(1,), classes=(), images=()):
+    import os
+    import xml.etree.ElementTree as ET
+
+    root = ET.Element("IPSDK")
+    ae = ET.SubElement(root, "AllElements")
+    for nm in images:
+        im = ET.SubElement(ae, "Image")
+        ET.SubElement(im, "Name").text = nm
+    lc = ET.SubElement(root, "LabelClasses")
+    ET.SubElement(lc, "NumberLabels").text = str(len(classes))
+    for i, (name, color, value) in enumerate(classes):
+        el = ET.SubElement(lc, f"Label_{i}")
+        ET.SubElement(el, "Color").text = ",".join(map(str, color))
+        n = ET.SubElement(el, "Name")
+        n.text = _ascii(name)
+        n.set("ASCII", "True")
+        ET.SubElement(el, "Value").text = str(value)
+    fe = ET.SubElement(root, "Features")
+    ET.SubElement(fe, "All_Sizes").text = ",".join(map(str, sizes))
+    for name in ("Gaussian", "Mean", "Laplacian Difference", "High Pass", "Variance",
+                 "Erosion", "Dilation", "Opening", "Closing"):
+        ET.SubElement(fe, name.replace(" ", "_")).text = ",".join(str(v) for v in flags.get(name, [False] * len(sizes)))
+    ET.SubElement(fe, "Dimension").text = dimension
+    ET.SubElement(fe, "MultiRes").text = ",".join(map(str, multires))
+    os.makedirs(folder, exist_ok=True)
+    ET.ElementTree(root).write(os.path.join(folder, "Settings.mho"))
+
+
+class _OldTree:
+    """Arbre picke au format scikit-learn < 1.3 (sans 'missing_go_to_left')."""
+
+    def __init__(self, tree):
+        self.t = tree
+
+    def __reduce__(self):
+        from sklearn.tree._tree import Tree
+
+        st = self.t.__getstate__()
+        nodes = st["nodes"]
+        names = [n for n in nodes.dtype.names if n != "missing_go_to_left"]
+        old = np.zeros(len(nodes), dtype=[(n, nodes.dtype[n]) for n in names])
+        for n in names:
+            old[n] = nodes[n]
+        state = {"max_depth": st["max_depth"], "node_count": st["node_count"], "nodes": old,
+                 "values": st["values"]}
+        return (Tree, (self.t.n_features, np.asarray(self.t.n_classes), self.t.n_outputs), state)
+
+
+def make_fake_ipsdk_model(folder, images, labels, sizes=(1, 2, 3), flags=None, dimension="2D",
+                          multires=(1,), old_sklearn=False, gaussian_normalize=True, zoom_mode="corner",
+                          names=("Fond", "Objet"), n_trees=20):
+    """Dossier IPSDK Explorer complet, entraine comme le fait l'Explorer (classes 0..n-1)."""
+    import copy
+    import os
+
+    import joblib
+    from sklearn.ensemble import RandomForestClassifier
+
+    from xwiclassifier.features.ipsdk import IPSDKFeatures
+    from xwiclassifier.io import write_image
+
+    flags = flags or {"Gaussian": [True, True, True], "Mean": [False, True, False],
+                      "Laplacian Difference": [True, False, True], "High Pass": [False, True, False],
+                      "Variance": [True, False, False], "Erosion": [False, True, False],
+                      "Dilation": [True, False, False], "Opening": [False, False, True],
+                      "Closing": [False, True, False]}
+    nm_imgs = [f"img{i}" for i in range(len(images))]
+    write_ipsdk_settings(folder, sizes, flags, dimension, multires,
+                         [(n, (255, 40 * i, 0), i) for i, n in enumerate(names)], nm_imgs)
+    feats = IPSDKFeatures.from_settings(list(sizes), flags, multires, dimension,
+                                        gaussian_normalize=gaussian_normalize, zoom_mode=zoom_mode)
+    Xs, ys = [], []
+    for nm, img, lab in zip(nm_imgs, images, labels):
+        write_image(os.path.join(folder, nm, "Image.tif"), img)
+        write_image(os.path.join(folder, nm, "ImageDraw.tif"), lab.astype(np.uint16))
+        f = feats.compute(img)
+        Xs.append(f[lab > 0])
+        ys.append(lab[lab > 0].astype(int) - 1)  # IPSDK : numLabel = valeur dessinee - 1
+    rf = RandomForestClassifier(n_estimators=n_trees, random_state=0).fit(np.concatenate(Xs), np.concatenate(ys))
+    to_dump = rf
+    if old_sklearn:
+        to_dump = copy.copy(rf)
+        ests = []
+        for e in rf.estimators_:
+            e2 = copy.copy(e)
+            e2.__dict__.pop("monotonic_cst", None)
+            e2.__dict__["tree_"] = _OldTree(e.tree_)
+            e2.__dict__["n_features_"] = e.n_features_in_
+            ests.append(e2)
+        to_dump.__dict__["estimators_"] = ests
+        to_dump.__dict__["base_estimator_"] = to_dump.__dict__.pop("estimator_")
+        to_dump.__dict__["n_features_"] = rf.n_features_in_
+        to_dump.__dict__["_sklearn_version"] = "0.24.1"
+    joblib.dump(to_dump, os.path.join(folder, "Model"))
+    open(os.path.join(folder, "ModelIPSDK.bin"), "wb").write(b"\x00IPSDK-binaire-factice")
+    return rf, feats

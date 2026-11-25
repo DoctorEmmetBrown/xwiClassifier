@@ -16,7 +16,8 @@ commande, et les modèles **ilastik** (`.ilp`) se chargent directement.
 - **Catalogue de features ouvert** : lissage, gradient, laplacien, DoG, valeurs
   propres de la Hessienne et du tenseur de structure, écart-type local,
   tubularité (fils/fibres), morphologie (érosion, dilatation, ouverture,
-  fermeture, gradient morphologique, top-hats, médian). Chaque famille se combine
+  fermeture, gradient morphologique, top-hats, médian) et filtres d'IPSDK (moyenne,
+  passe-haut, variance sur boîte). Chaque famille se combine
   librement avec des sigmas / rayons au choix, bien au-delà d'ilastik.
 - **Rapide et sobre en mémoire** : dérivées gaussiennes exactes, valeurs propres
   analytiques, cache partagé par échelle, multi-thread, traitement **par blocs
@@ -27,7 +28,7 @@ commande, et les modèles **ilastik** (`.ilp`) se chargent directement.
 - **Classifieurs** : RandomForest (défaut), ExtraTrees, LightGBM, XGBoost.
 - **Import ilastik sans ilastik ni vigra** : features reproduites à l'identique et
   forêts converties en scikit-learn ; ou ré-entraînement sur les annotations du projet.
-- **Récupération des modèles IPSDK** par distillation (voir plus bas).
+- **Import des modèles IPSDK Explorer** (dossiers Smart Segmentation) sans IPSDK.
 
 ## Installation
 
@@ -91,6 +92,7 @@ xwi train --image vol.tif --labels annot.tif -o modele.joblib \
 xwi predict modele.joblib "data/*.tif" -o resultats/ --proba --uncertainty --smooth 1
 xwi info modele.joblib                                    # description + contributions
 xwi convert projet.ilp -o modele.joblib                   # ilastik -> modèle xwi
+xwi convert DossierIPSDK -o modele.joblib                # IPSDK Explorer -> modèle xwi
 xwi ilastik-export projet.ilp -o annotations/             # images + annotations en TIFF
 xwi inspect fichier.(ilp|joblib|bin)                      # analyser un fichier
 ```
@@ -117,20 +119,22 @@ m = xwi.load_ilastik_model("projet.ilp", mode="retrain", features="ilastik")
 
 ## Récupérer des modèles IPSDK Explorer
 
-Les modèles « Smart Segmentation » d'IPSDK sont des objets `RandomForestModel`
-sérialisés dans un format binaire propriétaire non documenté : ils ne peuvent pas
-être relus directement. Deux voies :
+Un modèle « Smart Segmentation » est un dossier
+(`%APPDATA%\ReactivIP\Explorer\Machine_Learning\Pixel_Classification\<modèle>`) qui contient
+une forêt **scikit-learn** (`Model`), sa grille de features (`Settings.mho`) et les images
+annotées. xwi le charge directement, sans IPSDK ni licence :
 
-1. **Distillation** (une seule fois, avec la licence IPSDK encore active) :
-   `xwi ipsdk-distill modele.bin --image ref1.tif ref2.tif -o modele.joblib`.
-   PyIPSDK applique votre modèle, xwi échantillonne les pixels classés (les plus
-   sûrs en priorité) et entraîne un modèle équivalent, ensuite indépendant d'IPSDK.
-   L'accord est mesuré sur des pixels mis de côté.
-2. **Annotations** : exportez vos annotations IPSDK Explorer en image de labels
-   puis `xwi train`.
+```bash
+xwi predict "…/Pixel_Classification/MonModele" vol.tif -o seg.tif [--ipsdk-values]
+xwi convert "…/Pixel_Classification/MonModele" -o mon_modele.joblib
+```
 
-`xwi inspect modele.bin` résume le fichier (format probable, chaînes lisibles) :
-un exemple de modèle permettrait d'aller plus loin sur le format.
+Les filtres IPSDK (Gaussian, Mean, Laplacian Difference, High Pass, Variance, morphologie,
+multi-résolution) sont reproduits à l'identique, et transcrits en familles xwi (`mean`,
+`high_pass`, `box_variance`, morphologie `exact`). L'import vérifie le modèle sur ses propres
+annotations. Détails, correspondances et limites : [docs/ipsdk.md](docs/ipsdk.md).
+
+Pour un fichier `.bin` isolé, sans son dossier : `xwi ipsdk-distill` (PyIPSDK requis).
 
 ## Réglages de performance
 
@@ -155,13 +159,14 @@ src/xwiclassifier/
 ├── features/
 │   ├── engine.py         FeatureSpec + FeatureEngine (catalogue ouvert, cache, threads)
 │   ├── eigen.py          valeurs propres analytiques 2x2 / 3x3
-│   └── ilastik.py        reproduction des features ilastik
+│   ├── ilastik.py        reproduction des features ilastik
+│   └── ipsdk.py          reproduction des features IPSDK Explorer
 ├── classifier/
 │   ├── model.py          PixelClassifier (fit, predict par blocs, importances)
 │   ├── sampler.py        échantillons d'entraînement par bloc (+ cache)
 │   ├── estimators.py     RF / ExtraTrees / LightGBM / XGBoost
 │   └── vigra_forest.py   lecture des forêts vigra et conversion scikit-learn
-├── io/                   images, modèles (.joblib v2 et v0.1), ilastik (.ilp), IPSDK
+├── io/                   images, modèles (.joblib v2 et v0.1), ilastik (.ilp), IPSDK Explorer
 ├── cli.py                commande xwi
 └── napari/               widgets et manifeste du plugin
 ```
@@ -185,6 +190,6 @@ Les modèles `.joblib` reposent sur pickle : ne chargez que des modèles de conf
 - auto-context (deuxième étage entraîné sur les probabilités du premier) ;
 - classification d'objets après segmentation ;
 - dérivées gaussiennes sur GPU, export ONNX des forêts ;
-- validation sur des projets ilastik 3D réels et sur un modèle IPSDK réel.
+- validation sur des projets ilastik 3D réels et sur des modèles IPSDK Explorer réels.
 
 Licence BSD-3-Clause.

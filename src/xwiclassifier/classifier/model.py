@@ -159,6 +159,11 @@ class PixelClassifier:
         memo = None
         if self._memo is not None and self._memo[0] == image_fingerprint(image):
             memo = self._memo[1]  # features deja calculees lors de l'entrainement
+        full_only = getattr(self.extractor, "requires_full_image", False)
+        if full_only and memo is None:
+            # multi-resolution (IPSDK) : features calculees sur l'image entiere puis decoupees
+            memo = self.extractor.compute(img, norm=norm, channel_axis=ca)
+            halo = (0,) * ndim if not sh else halo
         bs = block_shape or (rshape if memo is not None else default_block_shape(rshape, n_feat, halo))
         bs = tuple(min(b, s) for b, s in zip(bs, rshape))
         K = len(self.classes_)
@@ -249,6 +254,16 @@ class PixelClassifier:
             lines.append(f"  normalisation={sp.normalize} spacing={sp.spacing} 2D_par_coupe={sp.compute_in_2d}")
         if self.training_info:
             lines.append(f"  entrainement: {self.training_info}")
+        src = self.source or {}
+        if src.get("annotation_agreement") is not None:
+            lines.append(f"  verification : {100 * src['annotation_agreement']:.2f}% d'accord avec les "
+                         f"annotations du modele d'origine")
+        if src.get("ipsdk_values"):
+            lines.append("  valeurs IPSDK: " + ", ".join(f"{k}->{v}" for k, v in src["ipsdk_values"].items()))
+        if getattr(self.extractor, "kind", "") == "ipsdk":
+            ex = self.extractor
+            lines.append(f"  grille IPSDK : {len(ex.grid)} filtres, dimension {ex.dimension}, "
+                         f"gaussienne normalisee={ex.gaussian_normalize}, zoom={ex.zoom_mode}")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
@@ -280,7 +295,16 @@ def uncertainty(proba: np.ndarray) -> np.ndarray:
 _SCALE_RE = re.compile(r"_s([0-9.]+)|\(σ=([0-9.]+)\)")
 
 
+_IPSDK_SIZE_RE = re.compile(r"\s(\d+)x\d+")
+
+
 def _group_key(name: str, group: str) -> str:
+    m = _IPSDK_SIZE_RE.search(name)
+    if m:  # nom IPSDK Explorer : "Gaussian 5x5 (x 1/2)"
+        if group == "family":
+            return name[:m.start()].strip()
+        if group == "scale":
+            return f"taille {m.group(1)}x{m.group(1)}"
     if group == "family":
         if "(" in name:  # nom ilastik
             return name.split(" (")[0]
