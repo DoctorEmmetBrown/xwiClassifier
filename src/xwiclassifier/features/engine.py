@@ -76,6 +76,10 @@ _reg("morph_gradient", "morpho", "1", 1, "Gradient morphologique (dilatation - e
 _reg("white_tophat", "morpho", "1", 1, "Top-hat blanc : petits objets clairs")
 _reg("black_tophat", "morpho", "1", 1, "Top-hat noir : petits objets sombres")
 _reg("median", "morpho", "1", 1, "Filtre median (lent pour les grands rayons)")
+# filtres a fenetre (demi-taille = rayon), transcrits d'IPSDK Explorer
+_reg("mean", "morpho", "1", 1, "Moyenne sur une boite (2r+1)^d (IPSDK : Mean)")
+_reg("high_pass", "morpho", "1", 1, "Passe-haut : noyau (2r+1)^d de -1, centre (2r+1)^d (IPSDK : High Pass)")
+_reg("box_variance", "morpho", "1", 1, "Variance locale sur une boite (2r+1)^d (IPSDK : Variance)")
 
 SMOOTH_FAMILIES = tuple(n for n, f in FAMILIES.items() if f.kind == "smooth")
 MORPHO_FAMILIES = frozenset(n for n, f in FAMILIES.items() if f.kind == "morpho")
@@ -123,8 +127,8 @@ class FeatureSpec:
             raise ValueError(f"Familles de features inconnues : {unknown}")
         if self.normalize not in NORMALIZATIONS:
             raise ValueError(f"normalize doit etre parmi {NORMALIZATIONS}")
-        if self.morpho_shape not in ("ball", "box"):
-            raise ValueError("morpho_shape doit etre 'ball' ou 'box'")
+        if self.morpho_shape not in ("ball", "exact", "box"):
+            raise ValueError("morpho_shape doit etre 'ball' (rapide), 'exact' (disque/boule exact) ou 'box'")
         if self.spacing is not None:
             self.spacing = tuple(float(s) for s in self.spacing)
         # dedoublonnage en conservant l'ordre
@@ -337,6 +341,18 @@ class _MorphoCtx:
             return [self.closing() - self.img]
         if fam == "median":
             return [bk.median(self.img, self.r, self.shape)]
+        if fam in ("mean", "high_pass", "box_variance"):
+            from scipy import ndimage as ndi
+
+            size = tuple(2 * r + 1 for r in self.r)
+            m = ndi.uniform_filter(self.img, size=size, output=np.float32, mode="mirror")
+            if fam == "mean":
+                return [m]
+            if fam == "high_pass":
+                n = float(np.prod(size))
+                return [((n + 1.0) * self.img - n * m).astype(np.float32)]
+            m2 = ndi.uniform_filter(self.img * self.img, size=size, output=np.float32, mode="mirror")
+            return [np.maximum(m2 - m * m, 0.0).astype(np.float32)]
         raise KeyError(fam)
 
 

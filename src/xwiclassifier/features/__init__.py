@@ -18,6 +18,9 @@ def make_extractor(features=None, n_threads=None):
         if kind == "ilastik":
             from .ilastik import IlastikFeatures
             return IlastikFeatures.from_dict(features)
+        if kind == "ipsdk":
+            from .ipsdk import IPSDKFeatures
+            return IPSDKFeatures.from_dict(features)
         raise ValueError(f"Type d'extracteur inconnu : {kind}")
     if hasattr(features, "compute") and hasattr(features, "halo"):
         return features

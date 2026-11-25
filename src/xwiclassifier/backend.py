@@ -175,7 +175,10 @@ def gaussian(image: np.ndarray, sigma, truncate: float = 3.0, order=0,
 # --------------------------------------------------------------------------
 @lru_cache(maxsize=64)
 def ellipsoid_footprint(radii: tuple) -> np.ndarray:
-    """Element structurant ellipsoidal (boule si rayons egaux) ; rayon 0 = axe ignore."""
+    """Element structurant ellipsoidal (boule si rayons egaux) ; rayon 0 = axe ignore.
+
+    Pour des rayons egaux r : points tels que x^2 + y^2 (+ z^2) <= r^2 (definition IPSDK).
+    """
     grids = np.ogrid[tuple(slice(-r, r + 1) for r in radii)]
     dist = np.zeros([2 * r + 1 for r in radii], dtype=float)
     for g, r in zip(grids, radii):
@@ -214,12 +217,12 @@ def _min_max(image: np.ndarray, radii: tuple, shape: str, op: str) -> np.ndarray
         f = ndi.minimum_filter if op == "min" else ndi.maximum_filter
         return f(img, size=size, mode="reflect")
     active = [r for r in radii if r > 0]
-    if len(set(active)) == 1 and img.ndim in (2, 3):
+    if shape == "ball" and len(set(active)) == 1 and img.ndim in (2, 3):
         out = _gpu_call("minimum_sphere" if op == "min" else "maximum_sphere", img,
                         **_xyz_kwargs("radius", radii))
         if out is not None:
             return out
-    seq = _decomposed_footprint(radii)
+    seq = _decomposed_footprint(radii) if shape == "ball" else None
     if seq is not None:
         from skimage import morphology
 
@@ -244,7 +247,7 @@ def median(image, radii, shape: str = "ball"):
     if not any(radii):
         return img
     active = [r for r in radii if r > 0]
-    if len(set(active)) == 1 and img.ndim in (2, 3):
+    if shape == "ball" and len(set(active)) == 1 and img.ndim in (2, 3):
         out = _gpu_call("median_sphere", img, **_xyz_kwargs("radius", radii))
         if out is not None:
             return out
